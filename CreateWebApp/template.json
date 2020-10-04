@@ -1,0 +1,170 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+		"LogicAppName": {
+			 "type": "string",
+			 "minLength": 1,
+			 "maxLength": 80,
+			 "defaultValue": "MyLogicApp",
+			 "metadata": {
+				"description": "The resource name for the logic app"
+			 }
+		  },
+		"onedrive_Connection_Name": {
+         "type": "string",
+         "defaultValue": "onedrive",
+         "metadata": {
+            "description": "The resource name to use for the onedrive connection"
+         }
+      },
+		"LogicAppLocation": {
+         "type": "string",
+         "minLength": 1,
+         "defaultValue": "[resourceGroup().location]",
+         "metadata": {
+            "description": "The resource location for the logic app"
+         }
+      }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('LogicAppName')]",
+            "location": "eastus",
+            "properties": {
+                "state": "Disabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "frequency": "Minute",
+                                "interval": 1
+                            },
+                            "type": "Recurrence",
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "runs": 1
+                                }
+                            }
+                        }
+                    },
+                    "actions": {
+                        "For_each": {
+                            "foreach": "@body('List_files_in_folder')?['value']",
+                            "actions": {
+                                "Condition": {
+                                    "actions": {
+                                        "Convert_file": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['onedrive']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "get",
+                                                "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(items('For_each')?['Id']))}/convert",
+                                                "queries": {
+                                                    "type": "JPG"
+                                                }
+                                            }
+                                        },
+                                        "Create_file": {
+                                            "runAfter": {
+                                                "Convert_file": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@body('Convert_file')",
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['onedrive']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/datasets/default/files",
+                                                "queries": {
+                                                    "folderPath": "/Pictures/converted",
+                                                    "name": "@base64ToString(outputs('Convert_file')['headers']['x-ms-file-name'])"
+                                                }
+                                            },
+                                            "runtimeConfiguration": {
+                                                "contentTransfer": {
+                                                    "transferMode": "Chunked"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {},
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "equals": [
+                                                    "@items('For_each')?['MediaType']",
+                                                    "image/png"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "type": "If"
+                                }
+                            },
+                            "runAfter": {
+                                "List_files_in_folder": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach"
+                        },
+                        "List_files_in_folder": {
+                            "runAfter": {},
+                            "metadata": {
+                                "D8159F1647995F2B!104": "/Pictures"
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['onedrive']['connectionId']"
+                                    }
+                                },
+                                "method": "get",
+                                "path": "/datasets/default/foldersV2/@{encodeURIComponent(encodeURIComponent('D8159F1647995F2B!104'))}",
+                                "queries": {
+                                    "skipToken": "",
+                                    "top": 20
+                                }
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "onedrive": {
+								"id": "[concat(subscription().id, '/providers/Microsoft.Web/locations/', parameters('LogicAppLocation'), '/managedApis/', 'onedrive')]",
+								"connectionId": "[resourceId('Microsoft.Web/connections', parameters('onedrive_Connection_Name'))]",
+                                "connectionName": "[parameters('onedrive_Connection_Name')]"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}
